@@ -254,6 +254,8 @@ This project already includes [vercel.json](./vercel.json) for SPA routing.
   - `VITE_FIREBASE_PROJECT_ID`
   - `VITE_FIREBASE_APP_ID`
   - `VITE_API_BASE_URL=https://YOUR-RENDER-BACKEND.onrender.com`
+  - `VITE_HOSTED_API_BASE_URL=https://YOUR-RENDER-BACKEND.onrender.com`
+  - `VITE_SECTOR_ROTATION_APP_URL=https://YOUR-RENDER-SECTOR-ROTATION.onrender.com`
 
 ### 3. Deploy the backend to Render
 
@@ -267,10 +269,13 @@ This project already includes [render.yaml](./render.yaml).
   - `ZERODHA_API_KEY`
   - `ZERODHA_API_SECRET`
   - `FMP_API_KEY`
+  - `OPENALGO_API_KEY`
+  - `OPENALGO_HOST=https://YOUR-OPENALGO-URL.onrender.com`
   - `ZERODHA_REDIRECT_URI=https://YOUR-RENDER-BACKEND.onrender.com/api/zerodha/callback`
   - `ZERODHA_FRONTEND_URL=https://YOUR-VERCEL-FRONTEND.vercel.app`
   - `ZERODHA_SESSION_PATH=server/.zerodha-session.json`
   - `ZERODHA_SERVER_PORT=10000`
+  - `SECTOR_ROTATION_API_BASE_URL=https://YOUR-RENDER-SECTOR-ROTATION.onrender.com`
   - `FMP_API_BASE_URL=https://financialmodelingprep.com/stable`
   - `BACKTEST_RANGE=2y`
   - `BACKTEST_FAST_WINDOW=20`
