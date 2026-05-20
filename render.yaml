@@ -7,12 +7,26 @@ services:
     startCommand: npm run start:server
     autoDeploy: true
     envVars:
+      - key: OPENALGO_API_KEY
+        sync: false
+      - key: OPENALGO_HOST
+        value: https://YOUR-OPENALGO-URL.onrender.com
+      - key: ZERODHA_API_KEY
+        sync: false
+      - key: ZERODHA_API_SECRET
+        sync: false
       - key: ZERODHA_SERVER_PORT
         value: 10000
       - key: FMP_API_KEY
         sync: false
       - key: FMP_API_BASE_URL
         value: https://financialmodelingprep.com/stable
+      - key: SECTOR_ROTATION_API_BASE_URL
+        value: https://YOUR-RENDER-SECTOR-ROTATION.onrender.com
+      - key: ZERODHA_REDIRECT_URI
+        value: https://YOUR-RENDER-BACKEND.onrender.com/api/zerodha/callback
+      - key: ZERODHA_FRONTEND_URL
+        value: https://YOUR-VERCEL-FRONTEND.vercel.app
       - key: BACKTEST_RANGE
         value: 2y
       - key: BACKTEST_FAST_WINDOW
