@@ -93,6 +93,8 @@ For hosting:
 
 ## Zerodha setup
 
+This section is for local development. For the online app, put the real values in Vercel and Render as shown below.
+
 - Set `VITE_API_BASE_URL=http://localhost:8000`
 - Set `ZERODHA_API_KEY` and `ZERODHA_API_SECRET`
 - Whitelist `http://localhost:8000/api/zerodha/callback` as the redirect URL in your Kite Connect app
@@ -125,6 +127,8 @@ To show the sector rotation map inside the dashboard, also set:
 
 - `SECTOR_ROTATION_API_BASE_URL=https://YOUR-RENDER-SECTOR-ROTATION.onrender.com`
 - `VITE_SECTOR_ROTATION_APP_URL=https://YOUR-RENDER-SECTOR-ROTATION.onrender.com`
+
+For the hosted app, the dashboard will load the sector rotation map from the URL in `VITE_SECTOR_ROTATION_APP_URL`, while the backend will fetch the same data through `SECTOR_ROTATION_API_BASE_URL`.
 
 ## Telegram Bot setup
 
@@ -235,6 +239,7 @@ Recommended setup:
 
 - Frontend: Vercel Hobby
 - Backend bridge: Render Free Web Service
+- Sector rotation map: Render Web Service or any hosted URL you control
 
 ### 1. Push this project to GitHub
 
@@ -256,6 +261,8 @@ This project already includes [vercel.json](./vercel.json) for SPA routing.
   - `VITE_API_BASE_URL=https://YOUR-RENDER-BACKEND.onrender.com`
   - `VITE_HOSTED_API_BASE_URL=https://YOUR-RENDER-BACKEND.onrender.com`
   - `VITE_SECTOR_ROTATION_APP_URL=https://YOUR-RENDER-SECTOR-ROTATION.onrender.com`
+  - `VITE_RUNTIME_MODE=web`
+  - `VITE_STORAGE_NAMESPACE=web`
 
 ### 3. Deploy the backend to Render
 
@@ -307,6 +314,7 @@ The backend now stores the Zerodha session only in `ZERODHA_SESSION_PATH`, so no
   - `https://YOUR-RENDER-BACKEND.onrender.com/api/zerodha/callback`
 - Zerodha postback URL:
   - `https://YOUR-RENDER-BACKEND.onrender.com/api/zerodha/postback`
+- If the Render service name is still `tickertap`, that is fine; only the deployed URL matters for StockOne.
 
 ### 5. Important free-hosting note
 
