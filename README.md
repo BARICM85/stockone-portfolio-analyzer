@@ -123,8 +123,8 @@ through OpenAlgo instead of talking to Kite directly.
 
 To show the sector rotation map inside the dashboard, also set:
 
-- `SECTOR_ROTATION_API_BASE_URL=http://127.0.0.1:8000`
-- `VITE_SECTOR_ROTATION_APP_URL=http://127.0.0.1:8000`
+- `SECTOR_ROTATION_API_BASE_URL=https://YOUR-RENDER-SECTOR-ROTATION.onrender.com`
+- `VITE_SECTOR_ROTATION_APP_URL=https://YOUR-RENDER-SECTOR-ROTATION.onrender.com`
 
 ## Telegram Bot setup
 
