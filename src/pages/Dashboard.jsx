@@ -10,6 +10,8 @@ import BacktestSection from '@/components/dashboard/BacktestSection';
 import AllocationChart from '@/components/dashboard/AllocationChart';
 import PortfolioHistoryChart from '@/components/dashboard/PortfolioHistoryChart';
 import PnLChart from '@/components/dashboard/PnLChart';
+import OpenAlgoSection from '@/components/dashboard/OpenAlgoSection';
+import SectorRotationSection from '@/components/dashboard/SectorRotationSection';
 import { derivePortfolioAnalytics, deriveWatchlistAnalytics, formatCurrency, formatPercent, getMarketLaggards, getMarketLeaders } from '@/lib/portfolioAnalytics';
 
 function Panel({ title, subtitle, action, children }) {
@@ -181,6 +183,14 @@ export default function Dashboard() {
           </div>
         </Panel>
       </div>
+
+      <Panel title="OpenAlgo" subtitle="Shared broker gateway that powers StockOne and the sector rotation view.">
+        <OpenAlgoSection />
+      </Panel>
+
+      <Panel title="Sector Rotation Map" subtitle="Live RRG snapshot and the embedded sector view.">
+        <SectorRotationSection />
+      </Panel>
 
       <div className="grid gap-6 xl:grid-cols-2">
         <Panel title="Top Movers" subtitle="Best performing names in the local market snapshot.">

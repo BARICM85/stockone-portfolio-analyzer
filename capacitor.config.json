@@ -1,6 +1,6 @@
 {
-  "appId": "com.bariyaone.tickertap",
-  "appName": "TickerTap Clone",
+  "appId": "com.bariyaone.stockone",
+  "appName": "StockOne Portfolio Analyzer",
   "webDir": "dist",
   "plugins": {
     "FirebaseAuthentication": {

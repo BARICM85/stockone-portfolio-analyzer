@@ -1,10 +1,10 @@
-# TickerTap Clone Portfolio Analyzer
+# StockOne Portfolio Analyzer
 
 Standalone React + Vite stock portfolio analyzing app with Firebase Google login and Zerodha broker sync support.
 
 ## Features
 
-- Dashboard with allocation, P&L, market movers, portfolio pulse, and watchlist triggers
+- Dashboard with allocation, P&L, market movers, portfolio pulse, watchlist triggers, OpenAlgo, and sector rotation sections
 - Dashboard backtest lane that runs each holding one by one and compares strategy return against buy-and-hold
 - Custom testing lane that imports symbols from Excel and scans three SMA rules with `<`, `>`, or `=`
 - Portfolio workspace with manual entry, CSV/JSON import, JSON export, search, and Zerodha holdings sync
@@ -98,6 +98,34 @@ For hosting:
 - Whitelist `http://localhost:8000/api/zerodha/callback` as the redirect URL in your Kite Connect app
 - Keep the backend running before clicking Connect Zerodha in the app
 
+### Shared OpenAlgo environment
+
+If this repo lives next to `openalgo` under `Projects/`, the backend will also read:
+
+- `../openalgo/.env`
+- `../openalgo/.env.local`
+
+That means you can keep the Zerodha app key and secret in OpenAlgo as:
+
+- `BROKER_API_KEY`
+- `BROKER_API_SECRET`
+
+and StockOne will reuse them automatically unless you override them with local `ZERODHA_*` values.
+
+If `OPENALGO_API_KEY` and `OPENALGO_HOST` are set in the shared OpenAlgo env, StockOne will fetch:
+
+- live quotes
+- historical candles
+- holdings
+- positions
+
+through OpenAlgo instead of talking to Kite directly.
+
+To show the sector rotation map inside the dashboard, also set:
+
+- `SECTOR_ROTATION_API_BASE_URL=https://YOUR-RENDER-SECTOR-ROTATION.onrender.com`
+- `VITE_SECTOR_ROTATION_APP_URL=https://YOUR-RENDER-SECTOR-ROTATION.onrender.com`
+
 ## Telegram Bot setup
 
 The backend includes a built-in Telegram bot for monitoring your portfolio on the go.
@@ -158,7 +186,7 @@ To make Google sign-in work inside the Android app, the Firebase Android app set
 1. In Firebase Console, add an Android app with package name:
 
 ```text
-com.bariyaone.tickertap
+com.bariyaone.stockone
 ```
 
 2. Register your debug/release SHA fingerprints in Firebase Authentication for that Android app.
@@ -180,7 +208,7 @@ This project is prepared for a future signed release build.
 1. Create your release keystore:
 
 ```bash
-keytool -genkeypair -v -keystore tickertap-release.keystore -alias tickertap -keyalg RSA -keysize 2048 -validity 10000
+keytool -genkeypair -v -keystore stockone-release.keystore -alias stockone -keyalg RSA -keysize 2048 -validity 10000
 ```
 
 2. Put the keystore somewhere safe outside Git, or inside `android/app` locally only.
@@ -226,6 +254,8 @@ This project already includes [vercel.json](./vercel.json) for SPA routing.
   - `VITE_FIREBASE_PROJECT_ID`
   - `VITE_FIREBASE_APP_ID`
   - `VITE_API_BASE_URL=https://YOUR-RENDER-BACKEND.onrender.com`
+  - `VITE_HOSTED_API_BASE_URL=https://YOUR-RENDER-BACKEND.onrender.com`
+  - `VITE_SECTOR_ROTATION_APP_URL=https://YOUR-RENDER-SECTOR-ROTATION.onrender.com`
 
 ### 3. Deploy the backend to Render
 
@@ -239,10 +269,13 @@ This project already includes [render.yaml](./render.yaml).
   - `ZERODHA_API_KEY`
   - `ZERODHA_API_SECRET`
   - `FMP_API_KEY`
+  - `OPENALGO_API_KEY`
+  - `OPENALGO_HOST=https://YOUR-OPENALGO-URL.onrender.com`
   - `ZERODHA_REDIRECT_URI=https://YOUR-RENDER-BACKEND.onrender.com/api/zerodha/callback`
   - `ZERODHA_FRONTEND_URL=https://YOUR-VERCEL-FRONTEND.vercel.app`
   - `ZERODHA_SESSION_PATH=server/.zerodha-session.json`
   - `ZERODHA_SERVER_PORT=10000`
+  - `SECTOR_ROTATION_API_BASE_URL=https://YOUR-RENDER-SECTOR-ROTATION.onrender.com`
   - `FMP_API_BASE_URL=https://financialmodelingprep.com/stable`
   - `BACKTEST_RANGE=2y`
   - `BACKTEST_FAST_WINDOW=20`

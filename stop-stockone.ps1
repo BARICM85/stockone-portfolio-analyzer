@@ -18,4 +18,4 @@ foreach ($processId in $processIds) {
     }
 }
 
-Write-Host 'TickerTap frontend/backend stopped if they were running.'
+Write-Host 'StockOne frontend/backend stopped if they were running.'

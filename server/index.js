@@ -22,20 +22,41 @@ function loadEnvFile(filePath) {
 }
 
 const projectRoot = resolve(__dirname, '..');
+const sharedOpenAlgoRoot = resolve(projectRoot, '..', 'openalgo');
 const env = {
+  ...loadEnvFile(resolve(sharedOpenAlgoRoot, '.env')),
+  ...loadEnvFile(resolve(sharedOpenAlgoRoot, '.env.local')),
   ...loadEnvFile(resolve(projectRoot, '.env')),
   ...loadEnvFile(resolve(projectRoot, '.env.local')),
   ...process.env,
 };
 
+function pickEnv(...keys) {
+  for (const key of keys) {
+    const value = env[key];
+    if (value !== undefined && value !== null && String(value).trim() !== '') {
+      return String(value).trim();
+    }
+  }
+  return '';
+}
+
+function trimTrailingSlash(value = '') {
+  return String(value || '').replace(/\/+$/, '');
+}
+
 const PORT = Number(env.PORT || env.ZERODHA_SERVER_PORT || 8000);
-const API_KEY = env.ZERODHA_API_KEY || '';
-const API_SECRET = env.ZERODHA_API_SECRET || '';
+const API_KEY = pickEnv('ZERODHA_API_KEY', 'BROKER_API_KEY');
+const API_SECRET = pickEnv('ZERODHA_API_SECRET', 'BROKER_API_SECRET');
+const OPENALGO_API_KEY = pickEnv('OPENALGO_API_KEY');
+const OPENALGO_HOST = trimTrailingSlash(pickEnv('OPENALGO_HOST', 'OPENALGO_API_BASE_URL') || 'http://127.0.0.1:5000');
+const USE_OPENALGO_DATA = Boolean(OPENALGO_API_KEY && OPENALGO_HOST);
+const SECTOR_ROTATION_API_BASE_URL = trimTrailingSlash(env.SECTOR_ROTATION_API_BASE_URL || 'http://127.0.0.1:8000');
 const FRONTEND_URL = env.ZERODHA_FRONTEND_URL || 'http://localhost:5173';
 const REDIRECT_URI = env.ZERODHA_REDIRECT_URI || `http://localhost:${PORT}/api/zerodha/callback`;
 const SESSION_PATH = resolve(projectRoot, env.ZERODHA_SESSION_PATH || 'server/.zerodha-session.json');
 const AUTH_CONTEXT_PATH = resolve(projectRoot, env.ZERODHA_AUTH_CONTEXT_PATH || 'server/.zerodha-auth-context.json');
-const NATIVE_REDIRECT_URL = env.ZERODHA_NATIVE_REDIRECT_URL || 'tickertap://zerodha/callback';
+const NATIVE_REDIRECT_URL = env.ZERODHA_NATIVE_REDIRECT_URL || 'stockone://zerodha/callback';
 const FMP_API_KEY = env.FMP_API_KEY || '';
 const FMP_API_BASE_URL = env.FMP_API_BASE_URL || 'https://financialmodelingprep.com/stable';
 const OLLAMA_BASE_URL = env.OLLAMA_BASE_URL || '';
@@ -47,15 +68,147 @@ const TELEGRAM_CHAT_ID = env.TELEGRAM_CHAT_ID || '';
 const ALERT_MONITOR_INTERVAL = 15 * 60 * 1000; // 15 minutes
 const sentAlertsCache = new Set();
 
+async function openAlgoRequest(path, payload) {
+  if (!USE_OPENALGO_DATA) {
+    throw new Error('OpenAlgo data source not configured.');
+  }
+
+  const response = await fetch(`${OPENALGO_HOST}/api/v1${path}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      apikey: OPENALGO_API_KEY,
+      ...(payload || {}),
+    }),
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data?.status !== 'success') {
+    throw new Error(data?.message || data?.error || 'OpenAlgo request failed.');
+  }
+  return data;
+}
+
+async function fetchSectorRotationSnapshot(params = {}) {
+  const url = new URL(`${SECTOR_ROTATION_API_BASE_URL}/api/rrg`);
+  url.searchParams.set('benchmark', String(params.benchmark || 'NIFTY').trim().toUpperCase() || 'NIFTY');
+  url.searchParams.set('tail', String(params.tail || 52));
+  if (params.extra) {
+    url.searchParams.set('extra', String(params.extra));
+  }
+
+  const response = await fetch(url);
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data?.detail || data?.error || 'Sector rotation request failed.');
+  }
+  return data;
+}
+
+function normalizeOpenAlgoQuote(symbol, exchange, data = {}) {
+  const ltp = Number(
+    data.ltp
+    ?? data.last_price
+    ?? data.lastPrice
+    ?? data.price
+    ?? 0,
+  );
+  const prevClose = Number(data.prev_close ?? data.prevClose ?? data.close ?? 0);
+  const changePercent = Number(
+    data.change_percent
+    ?? data.changePercent
+    ?? data.percent_change
+    ?? data.pchange
+    ?? (prevClose ? ((ltp - prevClose) / prevClose) * 100 : 0),
+  );
+
+  return {
+    symbol: String(data.symbol || symbol || '').trim().toUpperCase() || symbol,
+    marketSymbol: String(data.symbol || symbol || '').trim().toUpperCase() || symbol,
+    shortName: String(data.name || data.tradingsymbol || symbol || '').trim() || symbol,
+    price: ltp,
+    changePercent: Number.isFinite(changePercent) ? changePercent : 0,
+    exchange: String(data.exchange || exchange || '').trim().toUpperCase() || exchange,
+    currency: data.currency || 'INR',
+    source: 'openalgo',
+  };
+}
+
+function normalizeOpenAlgoHistory(symbol, exchange, data = []) {
+  const points = Array.isArray(data)
+    ? data
+        .map((row) => {
+          const timestampValue = row?.timestamp;
+          const timestampMs = typeof timestampValue === 'number'
+            ? (timestampValue < 1e12 ? timestampValue * 1000 : timestampValue)
+            : Date.parse(timestampValue);
+
+          const open = Number(row?.open);
+          const high = Number(row?.high);
+          const low = Number(row?.low);
+          const close = Number(row?.close);
+          if (![open, high, low, close].every(Number.isFinite)) return null;
+
+          return {
+            date: new Date(timestampMs).toISOString(),
+            open,
+            high,
+            low,
+            close,
+            volume: Number(row?.volume || 0),
+          };
+        })
+        .filter(Boolean)
+    : [];
+
+  return {
+    symbol,
+    marketSymbol: symbol,
+    exchange,
+    source: 'openalgo',
+    points,
+  };
+}
+
+function normalizeOpenAlgoHoldings(payload) {
+  const holdings = Array.isArray(payload?.holdings) ? payload.holdings : [];
+  return holdings.map((row) => ({
+    tradingsymbol: row.symbol || row.tradingsymbol || '',
+    symbol: row.symbol || row.tradingsymbol || '',
+    exchange: String(row.exchange || 'NSE').trim().toUpperCase() || 'NSE',
+    product: row.product || 'CNC',
+    quantity: Number(row.quantity || 0),
+    average_price: Number(row.average_price || row.avg_price || row.cost_price || 0),
+    last_price: Number(row.ltp || row.last_price || row.current_price || 0),
+    pnl: Number(row.pnl || 0),
+    pnlpercent: Number(row.pnlpercent || 0),
+    company_name: row.company_name || row.name || row.symbol || '',
+    sector: row.sector || 'OpenAlgo',
+    isin: row.isin || '',
+  }));
+}
+
+function normalizeOpenAlgoPositions(payload) {
+  const positions = Array.isArray(payload) ? payload : [];
+  return positions.map((row) => ({
+    tradingsymbol: row.symbol || row.tradingsymbol || '',
+    symbol: row.symbol || row.tradingsymbol || '',
+    exchange: String(row.exchange || 'NSE').trim().toUpperCase() || 'NSE',
+    product: row.product || 'MIS',
+    quantity: Number(row.quantity || 0),
+    average_price: Number(row.average_price || 0),
+    last_price: Number(row.ltp || row.last_price || 0),
+    pnl: Number(row.pnl || 0),
+  }));
+}
+
 async function checkPortfolioAlerts() {
   if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) return;
 
   try {
-    const session = await readSession();
-    if (!session?.access_token) return;
-
-    const data = await kiteRequest('/portfolio/holdings');
-    const holdings = data?.data || [];
+    const holdings = await fetchPortfolioHoldings();
     if (!holdings.length) return;
 
     for (const holding of holdings) {
@@ -493,7 +646,7 @@ async function handleTelegramUpdate(update) {
   }
 
   if (text === '/start') {
-    await sendTelegramMessage(`Welcome to TickerTap Portfolio Bot!\n\nYour Chat ID is: <code>${chatId}</code>\n\nUse /summary to get your portfolio status.`, chatId);
+    await sendTelegramMessage(`Welcome to StockOne Portfolio Bot!\n\nYour Chat ID is: <code>${chatId}</code>\n\nUse /summary to get your portfolio status.`, chatId);
   } else if (text === '/summary' || text === '/portfolio') {
     await handleTelegramSummary(chatId);
   } else if (text === '/positions') {
@@ -606,8 +759,7 @@ async function handleTelegramPositions(chatId) {
 
 async function handleTelegramSummary(chatId) {
   try {
-    const data = await kiteRequest('/portfolio/holdings');
-    const holdings = data?.data || [];
+    const holdings = await fetchPortfolioHoldings();
     
     if (!holdings.length) {
       await sendTelegramMessage('No holdings found to summarize.', chatId);
@@ -1173,6 +1325,33 @@ function mapYahooInterval(requestedInterval = '1d', range = '1d') {
   return '1d';
 }
 
+function mapOpenAlgoInterval(requestedInterval = '1d', range = '1d') {
+  const normalized = String(requestedInterval || '').toLowerCase();
+  const direct = new Map([
+    ['minute', '1m'],
+    ['1m', '1m'],
+    ['3m', '3m'],
+    ['5m', '5m'],
+    ['10m', '10m'],
+    ['15m', '15m'],
+    ['30m', '30m'],
+    ['60m', '1h'],
+    ['1h', '1h'],
+    ['day', 'D'],
+    ['1d', 'D'],
+    ['1w', 'D'],
+    ['1mo', 'D'],
+  ]);
+
+  if (direct.has(normalized)) {
+    return direct.get(normalized);
+  }
+
+  if (range === '1d') return '5m';
+  if (range === '5d') return '15m';
+  return 'D';
+}
+
 async function fetchZerodhaHistory(symbol, exchange = 'NSE', range = '6mo', requestedInterval = 'day') {
   const instrument = await resolveZerodhaInstrument(symbol, exchange);
   if (!instrument?.instrument_token) {
@@ -1477,7 +1656,20 @@ async function fetchZerodhaOptionChain(symbol, exchange = 'NSE', expiry = '', st
   };
 }
 
+async function fetchOpenAlgoQuote(symbol, exchange = 'NSE') {
+  const response = await openAlgoRequest('/quotes', { symbol, exchange });
+  return normalizeOpenAlgoQuote(symbol, exchange, response?.data || {});
+}
+
 async function fetchLiveQuote(symbol, exchange = 'NSE') {
+  if (USE_OPENALGO_DATA) {
+    try {
+      return await fetchOpenAlgoQuote(symbol, exchange);
+    } catch {
+      // fall through to the legacy providers when OpenAlgo is unavailable
+    }
+  }
+
   try {
     const zerodhaQuote = await fetchZerodhaQuote(symbol, exchange);
     return zerodhaQuote;
@@ -1520,34 +1712,36 @@ async function fetchLiveQuote(symbol, exchange = 'NSE') {
 }
 
 const INDEX_CATALOG = [
-  { key: 'nifty50', symbol: '^NSEI', label: 'NIFTY 50', fallbackPrice: 22419.95, fallbackChangePercent: -0.24 },
-  { key: 'banknifty', symbol: '^NSEBANK', label: 'BANK NIFTY', fallbackPrice: 48265.2, fallbackChangePercent: -0.31 },
-  { key: 'sensex', symbol: '^BSESN', label: 'SENSEX', fallbackPrice: 73642.15, fallbackChangePercent: -0.18 },
-  { key: 'niftynext50', symbol: '^NSMIDCP', label: 'NIFTY NEXT 50', fallbackPrice: 62184.3, fallbackChangePercent: 0.12 },
-  { key: 'midcap100', symbol: 'NIFTY_MIDCAP_100.NS', label: 'MIDCAP 100', fallbackPrice: 51432.8, fallbackChangePercent: 0.21 },
-  { key: 'midcap150', symbol: 'NIFTY_MIDCAP_150.NS', label: 'MIDCAP 150', fallbackPrice: 19864.3, fallbackChangePercent: 0.17 },
-  { key: 'smallcap100', symbol: 'NIFTY_SMLCAP_100.NS', label: 'SMALLCAP 100', fallbackPrice: 16782.45, fallbackChangePercent: -0.09 },
-  { key: 'smallcap250', symbol: 'NIFTY_SMALLCAP_250.NS', label: 'SMALLCAP 250', fallbackPrice: 14586.25, fallbackChangePercent: 0.28 },
-  { key: 'nifty500', symbol: 'NIFTY_500.NS', label: 'NIFTY 500', fallbackPrice: 20894.6, fallbackChangePercent: 0.05 },
-  { key: 'nifty200', symbol: 'NIFTY_200.NS', label: 'NIFTY 200', fallbackPrice: 12456.35, fallbackChangePercent: 0.08 },
-  { key: 'niftypsubank', symbol: '^NIFTYPSU', label: 'PSU BANK', fallbackPrice: 6842.5, fallbackChangePercent: -0.42 },
-  { key: 'niftypse', symbol: '^CNXPSE', label: 'NIFTY PSE', fallbackPrice: 10234.8, fallbackChangePercent: -0.33 },
-  { key: 'niftyinfra', symbol: '^CNXINFRA', label: 'NIFTY INFRA', fallbackPrice: 8912.7, fallbackChangePercent: 0.24 },
-  { key: 'niftyenergy', symbol: '^CNXENERGY', label: 'NIFTY ENERGY', fallbackPrice: 39874.25, fallbackChangePercent: -0.11 },
-  { key: 'niftyprivatebank', symbol: '^NIFTYPVTBANK', label: 'PVT BANK', fallbackPrice: 24836.1, fallbackChangePercent: 0.19 },
-  { key: 'niftyit', symbol: '^CNXIT', label: 'NIFTY IT', fallbackPrice: 35842.6, fallbackChangePercent: 0.18 },
-  { key: 'niftyauto', symbol: '^CNXAUTO', label: 'NIFTY AUTO', fallbackPrice: 21984.35, fallbackChangePercent: -0.12 },
-  { key: 'niftypharma', symbol: '^CNXPHARMA', label: 'NIFTY PHARMA', fallbackPrice: 18642.8, fallbackChangePercent: 0.42 },
-  { key: 'niftyfmcg', symbol: '^CNXFMCG', label: 'NIFTY FMCG', fallbackPrice: 54873.55, fallbackChangePercent: 0.07 },
-  { key: 'niftymetal', symbol: '^CNXMETAL', label: 'NIFTY METAL', fallbackPrice: 8342.4, fallbackChangePercent: -0.56 },
-  { key: 'niftyrealty', symbol: '^CNXREALTY', label: 'NIFTY REALTY', fallbackPrice: 918.2, fallbackChangePercent: -0.21 },
+  { key: 'nifty50', symbol: '^NSEI', label: 'NIFTY 50', openalgoSymbol: 'NIFTY', openalgoExchange: 'NSE_INDEX', fallbackPrice: 22419.95, fallbackChangePercent: -0.24 },
+  { key: 'banknifty', symbol: '^NSEBANK', label: 'BANK NIFTY', openalgoSymbol: 'BANKNIFTY', openalgoExchange: 'NSE_INDEX', fallbackPrice: 48265.2, fallbackChangePercent: -0.31 },
+  { key: 'sensex', symbol: '^BSESN', label: 'SENSEX', openalgoSymbol: 'SENSEX', openalgoExchange: 'BSE_INDEX', fallbackPrice: 73642.15, fallbackChangePercent: -0.18 },
+  { key: 'niftynext50', symbol: '^NSMIDCP', label: 'NIFTY NEXT 50', openalgoSymbol: 'NIFTYNXT50', openalgoExchange: 'NSE_INDEX', fallbackPrice: 62184.3, fallbackChangePercent: 0.12 },
+  { key: 'midcap100', symbol: 'NIFTY_MIDCAP_100.NS', label: 'MIDCAP 100', openalgoSymbol: 'MIDCPNIFTY', openalgoExchange: 'NSE_INDEX', fallbackPrice: 51432.8, fallbackChangePercent: 0.21 },
+  { key: 'midcap150', symbol: 'NIFTY_MIDCAP_150.NS', label: 'MIDCAP 150', openalgoSymbol: 'MIDCPNIFTY', openalgoExchange: 'NSE_INDEX', fallbackPrice: 19864.3, fallbackChangePercent: 0.17 },
+  { key: 'smallcap100', symbol: 'NIFTY_SMLCAP_100.NS', label: 'SMALLCAP 100', openalgoSymbol: 'NIFTYSMLCAP100', openalgoExchange: 'NSE_INDEX', fallbackPrice: 16782.45, fallbackChangePercent: -0.09 },
+  { key: 'smallcap250', symbol: 'NIFTY_SMALLCAP_250.NS', label: 'SMALLCAP 250', openalgoSymbol: 'NIFTYSMLCAP250', openalgoExchange: 'NSE_INDEX', fallbackPrice: 14586.25, fallbackChangePercent: 0.28 },
+  { key: 'nifty500', symbol: 'NIFTY_500.NS', label: 'NIFTY 500', openalgoSymbol: 'NIFTY500', openalgoExchange: 'NSE_INDEX', fallbackPrice: 20894.6, fallbackChangePercent: 0.05 },
+  { key: 'nifty200', symbol: 'NIFTY_200.NS', label: 'NIFTY 200', openalgoSymbol: 'NIFTY200', openalgoExchange: 'NSE_INDEX', fallbackPrice: 12456.35, fallbackChangePercent: 0.08 },
+  { key: 'niftypsubank', symbol: '^NIFTYPSU', label: 'PSU BANK', openalgoSymbol: 'NIFTYPSUBANK', openalgoExchange: 'NSE_INDEX', fallbackPrice: 6842.5, fallbackChangePercent: -0.42 },
+  { key: 'niftypse', symbol: '^CNXPSE', label: 'NIFTY PSE', openalgoSymbol: 'NIFTYPSE', openalgoExchange: 'NSE_INDEX', fallbackPrice: 10234.8, fallbackChangePercent: -0.33 },
+  { key: 'niftyinfra', symbol: '^CNXINFRA', label: 'NIFTY INFRA', openalgoSymbol: 'NIFTYINFRA', openalgoExchange: 'NSE_INDEX', fallbackPrice: 8912.7, fallbackChangePercent: 0.24 },
+  { key: 'niftyenergy', symbol: '^CNXENERGY', label: 'NIFTY ENERGY', openalgoSymbol: 'NIFTYENERGY', openalgoExchange: 'NSE_INDEX', fallbackPrice: 39874.25, fallbackChangePercent: -0.11 },
+  { key: 'niftyprivatebank', symbol: '^NIFTYPVTBANK', label: 'PVT BANK', openalgoSymbol: 'NIFTYPVTBANK', openalgoExchange: 'NSE_INDEX', fallbackPrice: 24836.1, fallbackChangePercent: 0.19 },
+  { key: 'niftyit', symbol: '^CNXIT', label: 'NIFTY IT', openalgoSymbol: 'NIFTYIT', openalgoExchange: 'NSE_INDEX', fallbackPrice: 35842.6, fallbackChangePercent: 0.18 },
+  { key: 'niftyauto', symbol: '^CNXAUTO', label: 'NIFTY AUTO', openalgoSymbol: 'NIFTYAUTO', openalgoExchange: 'NSE_INDEX', fallbackPrice: 21984.35, fallbackChangePercent: -0.12 },
+  { key: 'niftypharma', symbol: '^CNXPHARMA', label: 'NIFTY PHARMA', openalgoSymbol: 'NIFTYPHARMA', openalgoExchange: 'NSE_INDEX', fallbackPrice: 18642.8, fallbackChangePercent: 0.42 },
+  { key: 'niftyfmcg', symbol: '^CNXFMCG', label: 'NIFTY FMCG', openalgoSymbol: 'NIFTYFMCG', openalgoExchange: 'NSE_INDEX', fallbackPrice: 54873.55, fallbackChangePercent: 0.07 },
+  { key: 'niftymetal', symbol: '^CNXMETAL', label: 'NIFTY METAL', openalgoSymbol: 'NIFTYMETAL', openalgoExchange: 'NSE_INDEX', fallbackPrice: 8342.4, fallbackChangePercent: -0.56 },
+  { key: 'niftyrealty', symbol: '^CNXREALTY', label: 'NIFTY REALTY', openalgoSymbol: 'NIFTYREALTY', openalgoExchange: 'NSE_INDEX', fallbackPrice: 918.2, fallbackChangePercent: -0.21 },
 ];
 
 async function fetchIndexQuotes() {
   const results = await Promise.all(
     INDEX_CATALOG.map(async (item) => {
       try {
-        const response = await fetchLiveQuote(item.symbol);
+        const response = USE_OPENALGO_DATA && item.openalgoSymbol
+          ? await fetchOpenAlgoQuote(item.openalgoSymbol, item.openalgoExchange || 'NSE_INDEX')
+          : await fetchLiveQuote(item.symbol);
         return {
           key: item.key,
           label: item.label,
@@ -1579,7 +1773,64 @@ async function fetchIndexQuotes() {
   };
 }
 
+async function fetchOpenAlgoHistory(symbol, range = '6mo', interval = '1d', exchange = 'NSE') {
+  const { from, to } = buildZerodhaDateRange(range, 'day');
+  const response = await openAlgoRequest('/history', {
+    symbol,
+    exchange,
+    interval: mapOpenAlgoInterval(interval, range),
+    start_date: from.toISOString().slice(0, 10),
+    end_date: to.toISOString().slice(0, 10),
+    source: 'api',
+  });
+  return normalizeOpenAlgoHistory(symbol, exchange, response?.data || []);
+}
+
+async function fetchOpenAlgoHoldings() {
+  const response = await openAlgoRequest('/holdings', {});
+  return normalizeOpenAlgoHoldings(response?.data || {});
+}
+
+async function fetchOpenAlgoPositions() {
+  const response = await openAlgoRequest('/positionbook', {});
+  return normalizeOpenAlgoPositions(response?.data || []);
+}
+
+async function fetchPortfolioHoldings() {
+  if (USE_OPENALGO_DATA) {
+    try {
+      return await fetchOpenAlgoHoldings();
+    } catch {
+      // fall back to the legacy Zerodha session if OpenAlgo is unavailable
+    }
+  }
+
+  const data = await kiteRequest('/portfolio/holdings');
+  return Array.isArray(data?.data) ? data.data : [];
+}
+
+async function fetchPortfolioPositions() {
+  if (USE_OPENALGO_DATA) {
+    try {
+      return await fetchOpenAlgoPositions();
+    } catch {
+      // fall back to the legacy Zerodha session if OpenAlgo is unavailable
+    }
+  }
+
+  const data = await kiteRequest('/portfolio/positions');
+  return data?.data?.net || [];
+}
+
 async function fetchMarketHistory(symbol, range = '6mo', interval = '1d', exchange = 'NSE') {
+  if (USE_OPENALGO_DATA) {
+    try {
+      return await fetchOpenAlgoHistory(symbol, range, interval, exchange);
+    } catch {
+      // fall through to legacy providers when OpenAlgo history is unavailable
+    }
+  }
+
   try {
     return await fetchZerodhaHistory(symbol, exchange, range, interval);
   } catch {
@@ -1643,10 +1894,6 @@ async function fetchMarketHistory(symbol, range = '6mo', interval = '1d', exchan
   }
 
   throw new Error(`No chart history available for ${candidates.join(', ')}.`);
-}
-
-function trimTrailingSlash(value = '') {
-  return String(value || '').replace(/\/+$/, '');
 }
 
 function normalizeBacktestHoldings(holdings = []) {
@@ -2331,6 +2578,14 @@ const server = createServer(async (req, res) => {
       return sendJson(res, 200, history);
     }
 
+    if (req.method === 'GET' && url.pathname === '/api/integrations/sector-rotation/rrg') {
+      const benchmark = url.searchParams.get('benchmark') || 'NIFTY';
+      const tail = url.searchParams.get('tail') || '52';
+      const extra = url.searchParams.get('extra') || '';
+      const snapshot = await fetchSectorRotationSnapshot({ benchmark, tail, extra });
+      return sendJson(res, 200, snapshot);
+    }
+
     if (req.method === 'GET' && url.pathname === '/api/company/intelligence') {
       const symbol = url.searchParams.get('symbol') || '';
       const intelligence = await fetchCompanyIntelligence(symbol);
@@ -2356,9 +2611,15 @@ const server = createServer(async (req, res) => {
     if (req.method === 'GET' && url.pathname === '/api/zerodha/status') {
       const session = await readSession();
       return sendJson(res, 200, {
-        configured: Boolean(API_KEY && API_SECRET),
-        connected: Boolean(session?.access_token),
-        profile: session ? {
+        configured: USE_OPENALGO_DATA || Boolean(API_KEY && API_SECRET),
+        connected: USE_OPENALGO_DATA || Boolean(session?.access_token),
+        source: USE_OPENALGO_DATA ? 'openalgo' : 'zerodha',
+        profile: USE_OPENALGO_DATA ? {
+          user_id: 'openalgo',
+          user_name: 'OpenAlgo',
+          email: OPENALGO_HOST,
+          login_time: null,
+        } : session ? {
           user_id: session.user_id,
           user_name: session.user_name,
           email: session.email,
@@ -2368,6 +2629,9 @@ const server = createServer(async (req, res) => {
     }
 
     if (req.method === 'GET' && url.pathname === '/api/zerodha/login-url') {
+      if (USE_OPENALGO_DATA) {
+        return sendJson(res, 400, { error: 'OpenAlgo data mode is active. No Zerodha login is required.' });
+      }
       if (!API_KEY || !API_SECRET) {
         return sendJson(res, 400, { error: 'ZERODHA_API_KEY and ZERODHA_API_SECRET must be set in .env.' });
       }
@@ -2401,8 +2665,7 @@ const server = createServer(async (req, res) => {
 
     if (req.method === 'POST' && url.pathname === '/api/test/telegram-pl') {
       try {
-        const data = await kiteRequest('/portfolio/holdings');
-        const holdings = data?.data || [];
+        const holdings = await fetchPortfolioHoldings();
         if (!holdings.length) {
           return sendJson(res, 400, { error: 'No holdings found to summarize.' });
         }
@@ -2437,21 +2700,27 @@ const server = createServer(async (req, res) => {
     }
 
     if (req.method === 'GET' && url.pathname === '/api/zerodha/holdings') {
-      const data = await kiteRequest('/portfolio/holdings');
-      return sendJson(res, 200, data);
+      const holdings = await fetchPortfolioHoldings();
+      return sendJson(res, 200, { status: 'success', data: holdings });
     }
 
     if (req.method === 'GET' && url.pathname === '/api/zerodha/positions') {
-      const data = await kiteRequest('/portfolio/positions');
-      return sendJson(res, 200, data);
+      const positions = await fetchPortfolioPositions();
+      return sendJson(res, 200, { status: 'success', data: { net: positions, day: [] } });
     }
 
     if (req.method === 'GET' && url.pathname === '/api/zerodha/orders') {
+      if (USE_OPENALGO_DATA) {
+        return sendJson(res, 501, { error: 'Order book is not wired in OpenAlgo data mode.' });
+      }
       const data = await kiteRequest('/orders');
       return sendJson(res, 200, data);
     }
 
     if (req.method === 'POST' && url.pathname === '/api/zerodha/orders') {
+      if (USE_OPENALGO_DATA) {
+        return sendJson(res, 501, { error: 'Order placement is not wired in OpenAlgo data mode.' });
+      }
       const rawBody = await readRequestBody(req);
       const payload = JSON.parse(rawBody || '{}');
       const tradingsymbol = String(payload.tradingsymbol || payload.contractSymbol || '').trim().toUpperCase();
@@ -2498,11 +2767,17 @@ const server = createServer(async (req, res) => {
     }
 
     if (req.method === 'GET' && url.pathname === '/api/zerodha/margins') {
+      if (USE_OPENALGO_DATA) {
+        return sendJson(res, 501, { error: 'Margin view is not wired in OpenAlgo data mode.' });
+      }
       const data = await kiteRequest('/user/margins');
       return sendJson(res, 200, data);
     }
 
     if (req.method === 'POST' && url.pathname === '/api/zerodha/disconnect') {
+      if (USE_OPENALGO_DATA) {
+        return sendJson(res, 200, { success: true, disconnected: false, source: 'openalgo' });
+      }
       await clearSession();
       return sendJson(res, 200, { success: true });
     }
