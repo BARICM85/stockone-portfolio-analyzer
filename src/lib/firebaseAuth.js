@@ -4,7 +4,7 @@ import { FirebaseAuthentication } from '@capacitor-firebase/authentication';
 const FIREBASE_APP_SCRIPT = 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js';
 const FIREBASE_AUTH_SCRIPT = 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js';
 const FIREBASE_FIRESTORE_SCRIPT = 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js';
-const NATIVE_GOOGLE_SETUP_HINT = 'Android Google sign-in needs Firebase Android setup. Add android/app/google-services.json for com.bariyaone.tickertap and register the app SHA fingerprints in Firebase.';
+const NATIVE_GOOGLE_SETUP_HINT = 'Android Google sign-in needs Firebase Android setup. Add android/app/google-services.json for com.bariyaone.stockone and register the app SHA fingerprints in Firebase.';
 
 let firebaseReadyPromise;
 

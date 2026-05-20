@@ -1,7 +1,7 @@
 import { Capacitor } from '@capacitor/core';
 
 const DEFAULT_API_BASE = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_BROKER_API_URL || '';
-const HOSTED_API_BASE = import.meta.env.VITE_HOSTED_API_BASE_URL || 'https://tickertap-backend-88ts.onrender.com';
+const HOSTED_API_BASE = import.meta.env.VITE_HOSTED_API_BASE_URL || 'https://stockone-backend.onrender.com';
 
 function trimSlash(value = '') {
   return value.endsWith('/') ? value.slice(0, -1) : value;
@@ -111,6 +111,16 @@ export function placeZerodhaOrder(payload) {
 
 export function disconnectZerodha() {
   return request('/api/zerodha/disconnect', { method: 'POST' });
+}
+
+export function getSectorRotationRrg(params = {}) {
+  const search = new URLSearchParams();
+  search.set('benchmark', String(params.benchmark || 'NIFTY').trim().toUpperCase() || 'NIFTY');
+  search.set('tail', String(params.tail || 52));
+  if (params.extra) {
+    search.set('extra', String(params.extra));
+  }
+  return request(`/api/integrations/sector-rotation/rrg?${search.toString()}`);
 }
 
 export function testTelegramAlert() {

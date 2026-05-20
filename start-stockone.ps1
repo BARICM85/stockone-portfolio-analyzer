@@ -37,11 +37,11 @@ if ($StartupDelaySeconds -gt 0) {
 }
 
 if (-not (Test-PortListening -Port $backendPort)) {
-    Start-ServiceWindow -Title 'TickerTap Backend' -Command 'npm run dev:server'
+    Start-ServiceWindow -Title 'StockOne Backend' -Command 'npm run dev:server'
 }
 
 if (-not (Test-PortListening -Port $frontendPort)) {
-    Start-ServiceWindow -Title 'TickerTap Frontend' -Command 'npm run dev'
+    Start-ServiceWindow -Title 'StockOne Frontend' -Command 'npm run dev'
 }
 
 if ($OpenBrowser) {

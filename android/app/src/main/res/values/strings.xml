@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">TickerTap Clone</string>
-    <string name="title_activity_main">TickerTap Clone</string>
-    <string name="package_name">com.bariyaone.tickertap</string>
-    <string name="custom_url_scheme">com.bariyaone.tickertap</string>
+    <string name="app_name">StockOne Portfolio Analyzer</string>
+    <string name="title_activity_main">StockOne Portfolio Analyzer</string>
+    <string name="package_name">com.bariyaone.stockone</string>
+    <string name="custom_url_scheme">com.bariyaone.stockone</string>
 </resources>

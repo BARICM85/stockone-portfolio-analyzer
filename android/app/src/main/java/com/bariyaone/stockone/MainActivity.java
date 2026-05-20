@@ -1,4 +1,4 @@
-package com.bariyaone.tickertap;
+package com.bariyaone.stockone;
 
 import com.getcapacitor.BridgeActivity;
 

@@ -13,6 +13,7 @@ export default function BrokerSyncPanel({ currentStocks = [], onSynced }) {
   const [disconnecting, setDisconnecting] = useState(false);
   const brokerApiBase = getBrokerApiBase();
   const redirectUrl = getZerodhaRedirectUrl();
+  const openAlgoMode = status?.source === 'openalgo';
   const usesHostedBroker = Boolean(brokerApiBase) && !/localhost|127\.0\.0\.1/i.test(brokerApiBase);
   const getHoldingKey = (row) => `${String(row?.exchange || 'NSE').trim().toUpperCase()}:${String(row?.symbol || '').trim().toUpperCase()}`;
 
@@ -107,23 +108,23 @@ export default function BrokerSyncPanel({ currentStocks = [], onSynced }) {
       ));
       const queryList = diagnostics.map((row) => row.queryHint);
 
-      console.groupCollapsed('[TickerTap] Zerodha holdings sync diagnostics');
+      console.groupCollapsed('[StockOne] Zerodha holdings sync diagnostics');
       console.info('Counts', {
         rawHoldings: brokerHoldings.length,
         uniqueKeys: new Set(diagnostics.map((row) => row.key)).size,
         createdCount,
         updatedCount,
       });
-      console.log('[TickerTap] Zerodha query list:', queryList);
+      console.log('[StockOne] Zerodha query list:', queryList);
       console.table(diagnostics);
       if (duplicateDiagnostics.length) {
-        console.warn('[TickerTap] Duplicate Zerodha holding keys detected:');
+        console.warn('[StockOne] Duplicate Zerodha holding keys detected:');
         console.table(duplicateDiagnostics);
       }
       if (reviewDiagnostics.length) {
-        console.warn('[TickerTap] Review these holdings first:');
+        console.warn('[StockOne] Review these holdings first:');
         console.table(reviewDiagnostics);
-        console.log('[TickerTap] Review query list:', reviewDiagnostics.map((row) => row.queryHint));
+        console.log('[StockOne] Review query list:', reviewDiagnostics.map((row) => row.queryHint));
       }
       console.groupEnd();
 
@@ -165,9 +166,11 @@ export default function BrokerSyncPanel({ currentStocks = [], onSynced }) {
       <div className="flex items-start justify-between gap-4">
         <div>
           <p className="text-xs uppercase tracking-[0.24em] text-amber-200/80">Broker sync</p>
-          <h2 className="mt-2 text-2xl font-semibold text-white">Zerodha import</h2>
+          <h2 className="mt-2 text-2xl font-semibold text-white">{openAlgoMode ? 'OpenAlgo import' : 'Zerodha import'}</h2>
           <p className="mt-2 text-sm leading-7 text-slate-400">
-            Connect Kite Connect, fetch holdings and positions through the active backend, and merge them into the portfolio.
+            {openAlgoMode
+              ? 'Fetch holdings, positions, quotes, and history through OpenAlgo, then merge them into the portfolio.'
+              : 'Connect Kite Connect, fetch holdings and positions through the active backend, and merge them into the portfolio.'}
           </p>
           {Capacitor.isNativePlatform() ? (
             <p className="mt-2 text-sm leading-7 text-cyan-200/80">
@@ -190,10 +193,10 @@ export default function BrokerSyncPanel({ currentStocks = [], onSynced }) {
           <>
             <div className="flex flex-wrap items-center gap-3">
               <span className={`rounded-full px-3 py-1 text-xs font-medium ${status?.configured ? 'bg-cyan-400/15 text-cyan-200' : 'bg-rose-400/15 text-rose-200'}`}>
-                {backendUnavailable ? 'Backend unavailable' : status?.configured ? 'Configured' : 'Not configured'}
-              </span>
-              <span className={`rounded-full px-3 py-1 text-xs font-medium ${status?.connected ? 'bg-emerald-400/15 text-emerald-200' : 'bg-slate-400/15 text-slate-300'}`}>
-                {status?.connected ? 'Connected' : 'Disconnected'}
+              {backendUnavailable ? 'Backend unavailable' : status?.configured ? (openAlgoMode ? 'OpenAlgo ready' : 'Configured') : 'Not configured'}
+            </span>
+            <span className={`rounded-full px-3 py-1 text-xs font-medium ${status?.connected ? 'bg-emerald-400/15 text-emerald-200' : 'bg-slate-400/15 text-slate-300'}`}>
+                {status?.connected ? (openAlgoMode ? 'OpenAlgo connected' : 'Connected') : 'Disconnected'}
               </span>
               {status?.profile?.user_name ? (
                 <span className="rounded-full bg-white/10 px-3 py-1 text-xs text-slate-300">
@@ -204,12 +207,12 @@ export default function BrokerSyncPanel({ currentStocks = [], onSynced }) {
 
             <div className="mt-4 text-sm text-slate-400">
               {backendUnavailable
-                ? 'Hosted broker backend is currently unavailable. Restart or redeploy the backend service in Render, then retry Zerodha connect.'
+                ? 'Broker backend is currently unavailable. Restart or redeploy the backend service, then retry.'
                 : status?.connected
                 ? `Ready to sync live holdings. Current local portfolio already contains ${currentSymbols.size} symbols.`
                 : usesHostedBroker
                   ? 'Hosted backend is active. Add Zerodha credentials to the backend environment and then connect your account to fetch live broker data.'
-                  : 'Add Zerodha API credentials in your local .env and connect your account to fetch live broker data.'}
+                  : 'Add broker API credentials in your local .env and connect your account to fetch live broker data.'}
             </div>
 
             {status?.error ? <p className="mt-3 text-sm text-rose-300">{status.error}</p> : null}

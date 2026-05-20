@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: tickertap-backend
+    name: stockone-backend
     runtime: node
     plan: free
     buildCommand: npm install

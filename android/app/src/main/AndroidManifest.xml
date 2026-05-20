@@ -27,7 +27,7 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data
-                    android:scheme="tickertap"
+                    android:scheme="stockone"
                     android:host="zerodha"
                     android:pathPrefix="/callback" />
             </intent-filter>
