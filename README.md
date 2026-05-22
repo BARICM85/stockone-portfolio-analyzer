@@ -68,7 +68,7 @@ uv sync
 uv run python api_server.py
 ```
 
-Open [http://127.0.0.1:8000](http://127.0.0.1:8000) in your browser.
+Open [http://127.0.0.1:8002](http://127.0.0.1:8002) in your browser.
 
 ## Configuration
 
@@ -79,11 +79,13 @@ Configure via the `.env` file (copy from `.env.sample`):
 | `OPENALGO_API_KEY` | — | Your OpenAlgo API key |
 | `OPENALGO_HOST` | `http://127.0.0.1:5000` | OpenAlgo server URL |
 
+If this repo sits next to `openalgo`, it can also reuse the shared `../openalgo/.env` file for the same OpenAlgo key and host.
+
 ## Features
 
 - Real-time RRG computation for 12 NSE sector indices
 - Switchable benchmarks (Nifty 50, Bank Nifty, etc.)
-- Adjustable tail lengths (6, 8, 12, 16, 20 weeks)
+- Adjustable tail lengths (6, 8, 12, 16, 20, 52 weeks)
 - Drill down into sector constituents
 - Add custom symbols and create portfolios
 - Interactive D3 scatter chart with tails, tooltips, and highlighting

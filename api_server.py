@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 from datetime import datetime, timedelta
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -19,8 +20,14 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
+PROJECT_ROOT = Path(__file__).resolve().parent
+SHARED_OPENALGO_ROOT = PROJECT_ROOT.parent / "openalgo"
+
 # ── Load .env ──
-load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"), override=True)
+load_dotenv(SHARED_OPENALGO_ROOT / ".env", override=False)
+load_dotenv(SHARED_OPENALGO_ROOT / ".env.local", override=False)
+load_dotenv(PROJECT_ROOT / ".env", override=True)
+load_dotenv(PROJECT_ROOT / ".env.local", override=True)
 
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -60,11 +67,22 @@ DEFAULT_SECTORS = {
 
 BENCHMARKS = {
     "NIFTY": "Nifty 50",
-    "BANKNIFTY": "Bank Nifty",
+    "BANKNIFTY": "NIFTY BANK",
+    "FINNIFTY": "NIFTY FIN SERVICE",
     "NIFTY500": "Nifty 500",
     "NIFTYNXT50": "Nifty Next 50",
     "MIDCPNIFTY": "Midcap Nifty",
-    "FINNIFTY": "Fin Nifty",
+}
+
+BENCHMARK_ALIASES = {
+    "NIFTY 50": "NIFTY",
+    "NIFTY BANK": "BANKNIFTY",
+    "NIFTY FIN SERVICE": "FINNIFTY",
+    "NIFTY NEXT 50": "NIFTYNXT50",
+    "MIDCAP NIFTY": "MIDCPNIFTY",
+    "NIFTY 500": "NIFTY500",
+    "BANK NIFTY": "BANKNIFTY",
+    "FIN NIFTY": "FINNIFTY",
 }
 
 # Default tracked assets (beyond sector indices) — currently none
@@ -105,6 +123,23 @@ NSE_INDEX_SYMBOLS = {
     "NIFTY200QUALTY30", "NIFTY50EQLWGT", "NIFTY50VALUE20",
 }
 
+SYMBOL_ALIAS_MAP = {
+    "TMCV": "TMPV",
+    "TATAMOTORS": "TMPV",
+}
+
+
+def _resolve_symbol_alias(symbol):
+    return SYMBOL_ALIAS_MAP.get(symbol, symbol)
+
+
+def _resolve_benchmark(symbol):
+    """Map friendly benchmark labels back to canonical symbol ids."""
+    raw = (symbol or "").strip().upper()
+    if not raw:
+        return "NIFTY"
+    return BENCHMARK_ALIASES.get(raw, raw.replace(" ", ""))
+
 
 def _get_exchange(symbol):
     """Determine exchange for a symbol."""
@@ -113,12 +148,40 @@ def _get_exchange(symbol):
     return "NSE"
 
 
+def _history_result_to_dataframe(result):
+    """Best-effort normalize OpenAlgo history responses to a DataFrame.
+
+    OpenAlgo usually returns a DataFrame, but some failure paths return a
+    plain dict payload. Treat those as empty unless they contain row data.
+    """
+    if result is None:
+        return None
+
+    if isinstance(result, pd.DataFrame):
+        return result
+
+    if isinstance(result, dict):
+        rows = result.get("data")
+        if isinstance(rows, pd.DataFrame):
+            return rows
+        if isinstance(rows, list) and rows:
+            try:
+                df = pd.DataFrame(rows)
+            except Exception:
+                return None
+            return df if not df.empty else None
+
+    return None
+
+
 def fetch_prices(symbols, start_date=None, end_date=None):
     """Fetch daily close prices from OpenAlgo, resample to weekly, with caching."""
     if end_date is None:
         end_date = datetime.now().strftime("%Y-%m-%d")
     if start_date is None:
-        start_date = (datetime.now() - timedelta(days=730)).strftime("%Y-%m-%d")
+        # Use a longer lookback so tails above 52w still have enough weekly bars
+        # after the 52-week rolling warmup.
+        start_date = (datetime.now() - timedelta(days=1825)).strftime("%Y-%m-%d")
 
     key = _cache_key(symbols, start_date, end_date)
     now = time.time()
@@ -130,14 +193,16 @@ def fetch_prices(symbols, start_date=None, end_date=None):
 
     for sym in symbols:
         try:
-            exchange = _get_exchange(sym)
+            resolved_sym = _resolve_symbol_alias(sym)
+            exchange = _get_exchange(resolved_sym)
             df = client.history(
-                symbol=sym,
+                symbol=resolved_sym,
                 exchange=exchange,
                 interval="D",
                 start_date=start_date,
                 end_date=end_date,
             )
+            df = _history_result_to_dataframe(df)
             if df is not None and not df.empty and "close" in df.columns:
                 # Ensure index is datetime
                 if not isinstance(df.index, pd.DatetimeIndex):
@@ -217,11 +282,11 @@ def compute_single_rrg(sector_prices, benchmark_prices, tail_length=8):
 @app.get("/api/rrg")
 def get_rrg(
     benchmark: str = Query("NIFTY"),
-    tail: int = Query(8, ge=4, le=30),
+    tail: int = Query(52, ge=4, le=156),
     extra: str = Query("", description="Comma-separated extra symbols"),
 ):
     """Compute full RRG for all sectors + any extra symbols vs the given benchmark."""
-    benchmark = benchmark.upper().strip()
+    benchmark = _resolve_benchmark(benchmark)
 
     # Parse extra symbols
     extra_symbols = []
@@ -314,10 +379,10 @@ def get_holdings():
 def get_rrg_stocks(
     symbols: str = Query(..., description="Comma-separated stock symbols"),
     benchmark: str = Query("NIFTY"),
-    tail: int = Query(8, ge=4, le=30),
+    tail: int = Query(52, ge=4, le=156),
 ):
     """Compute RRG for a batch of individual stocks vs benchmark."""
-    benchmark = benchmark.upper().strip()
+    benchmark = _resolve_benchmark(benchmark)
     stock_list = [s.strip().upper() for s in symbols.split(",") if s.strip()]
     if not stock_list:
         raise HTTPException(status_code=422, detail="No symbols provided")
@@ -355,15 +420,15 @@ def get_rrg_stocks(
 class PortfolioRequest(BaseModel):
     symbols: list[str]
     benchmark: str = "NIFTY"
-    tail: int = 8
+    tail: int = 52
 
 
 @app.post("/api/rrg-portfolio")
 def get_rrg_portfolio(req: PortfolioRequest):
     """Compute RRG for an equal-weighted portfolio composite vs benchmark."""
-    benchmark = req.benchmark.upper().strip()
+    benchmark = _resolve_benchmark(req.benchmark)
     stock_list = [s.strip().upper() for s in req.symbols if s.strip()]
-    tail_length = max(4, min(30, req.tail))
+    tail_length = max(4, min(156, req.tail))
 
     if not stock_list or len(stock_list) < 1:
         raise HTTPException(status_code=422, detail="Portfolio needs at least 1 symbol")
@@ -424,16 +489,18 @@ def validate_symbol(req: ValidateRequest):
     if not sym:
         raise HTTPException(status_code=422, detail="Empty symbol")
     try:
-        exchange = _get_exchange(sym)
+        resolved_sym = _resolve_symbol_alias(sym)
+        exchange = _get_exchange(resolved_sym)
         end_date = datetime.now().strftime("%Y-%m-%d")
         start_date = (datetime.now() - timedelta(days=10)).strftime("%Y-%m-%d")
         df = client.history(
-            symbol=sym,
+            symbol=resolved_sym,
             exchange=exchange,
             interval="D",
             start_date=start_date,
             end_date=end_date,
         )
+        df = _history_result_to_dataframe(df)
         if df is None or df.empty:
             raise HTTPException(status_code=404, detail=f"No data found for {sym}")
         return {"symbol": sym, "name": sym, "valid": True}
@@ -465,4 +532,5 @@ def serve_static(filename: str):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    port = int(os.environ.get("SECTOR_ROTATION_PORT", os.environ.get("PORT", "8002")))
+    uvicorn.run(app, host="0.0.0.0", port=port)

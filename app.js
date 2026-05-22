@@ -4,11 +4,12 @@
    ================================================================ */
 
 const API_BASE = "";
+const DEFAULT_BENCHMARK = "NIFTY";
 
 /* ── State ── */
 const state = {
-  benchmark: "NIFTY",
-  tailLength: 8,
+  benchmark: DEFAULT_BENCHMARK,
+  tailLength: 52,
   customSymbols: [],        // user-added tickers
   portfolios: [],           // user-created portfolios [{id, name, color, symbols:[]}]
   portfolioRRG: {},         // composite RRG data keyed by portfolio id
@@ -26,15 +27,17 @@ const state = {
 
 /* ── Constants ── */
 const BENCHMARKS = [
-  { id: "NIFTY", label: "NIFTY" },
-  { id: "BANKNIFTY", label: "BANKNIFTY" },
-  { id: "NIFTY500", label: "NIFTY500" },
-  { id: "NIFTYNXT50", label: "NIFTYNXT50" },
-  { id: "MIDCPNIFTY", label: "MIDCPNIFTY" },
-  { id: "FINNIFTY", label: "FINNIFTY" },
+  { id: "NIFTY", label: "NIFTY 50" },
+  { id: "BANKNIFTY", label: "NIFTY BANK" },
+  { id: "FINNIFTY", label: "NIFTY FIN SERVICE" },
+  { id: "NIFTY500", label: "Nifty 500" },
+  { id: "NIFTYNXT50", label: "Nifty Next 50" },
+  { id: "MIDCPNIFTY", label: "Midcap Nifty" },
 ];
 
-const TAIL_LENGTHS = [6, 8, 12, 16, 20];
+const SHORT_TAIL_LENGTHS = [6, 8, 12, 16, 20, 52];
+const EXTENDED_TAIL_LENGTHS = Array.from({ length: 26 }, (_, i) => 56 + i * 4);
+const TAIL_LENGTHS = [...SHORT_TAIL_LENGTHS, ...EXTENDED_TAIL_LENGTHS];
 
 const BENCHMARK_NAMES = {
   NIFTY: "Nifty 50", BANKNIFTY: "Bank Nifty", NIFTY500: "Nifty 500",
@@ -44,6 +47,23 @@ const BENCHMARK_NAMES = {
   NIFTYREALTY: "Realty", NIFTYPVTBANK: "Pvt Bank", NIFTYPSUBANK: "PSU Bank",
   NIFTYMEDIA: "Media", NIFTYINFRA: "Infra", NIFTYCOMMODITIES: "Commodities",
 };
+
+const BENCHMARK_ALIASES = {
+  "NIFTY 50": "NIFTY",
+  "NIFTY BANK": "BANKNIFTY",
+  "NIFTY FIN SERVICE": "FINNIFTY",
+  "NIFTY NEXT 50": "NIFTYNXT50",
+  "MIDCAP NIFTY": "MIDCPNIFTY",
+  "NIFTY 500": "NIFTY500",
+  "BANK NIFTY": "BANKNIFTY",
+  "FIN NIFTY": "FINNIFTY",
+};
+
+function normalizeBenchmarkId(value) {
+  const raw = String(value || "").trim().toUpperCase();
+  if (!raw) return DEFAULT_BENCHMARK;
+  return BENCHMARK_ALIASES[raw] || raw.replace(/\s+/g, "");
+}
 
 /* Friendly short names for sector indices on chart labels */
 const SECTOR_DISPLAY = {};
@@ -97,8 +117,14 @@ const CHEVRON_SVG = `<svg viewBox="0 0 12 12" fill="none"><path d="M4.5 2.5L8 6L
 
 /* ── API ── */
 async function fetchRRGData() {
-  const extra = state.customSymbols.join(",");
-  const url = `${API_BASE}/api/rrg?benchmark=${state.benchmark}&tail=${state.tailLength}${extra ? "&extra=" + extra : ""}`;
+  const params = new URLSearchParams({
+    benchmark: normalizeBenchmarkId(state.benchmark),
+    tail: String(state.tailLength),
+  });
+  if (state.customSymbols.length > 0) {
+    params.set("extra", state.customSymbols.join(","));
+  }
+  const url = `${API_BASE}/api/rrg?${params.toString()}`;
   const res = await fetch(url);
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
@@ -111,7 +137,12 @@ async function fetchHoldings() {
 }
 
 async function fetchStockRRG(symbols) {
-  const url = `${API_BASE}/api/rrg-stocks?symbols=${symbols.join(",")}&benchmark=${state.benchmark}&tail=${state.tailLength}`;
+  const params = new URLSearchParams({
+    symbols: symbols.join(","),
+    benchmark: normalizeBenchmarkId(state.benchmark),
+    tail: String(state.tailLength),
+  });
+  const url = `${API_BASE}/api/rrg-stocks?${params.toString()}`;
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Stock RRG error: ${res.status}`);
   return res.json();
@@ -136,7 +167,7 @@ async function fetchPortfolioRRG(symbols) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       symbols: symbols,
-      benchmark: state.benchmark,
+      benchmark: normalizeBenchmarkId(state.benchmark),
       tail: state.tailLength,
     }),
   });
@@ -317,9 +348,6 @@ async function toggleSectorExpand(sectorSym) {
   renderSidebar();
 }
 
-/* ── Default benchmark ── */
-const DEFAULT_BENCHMARK = "VTI";
-
 /* ── Get holding symbols for a sector key (including portfolios) ── */
 function getHoldingSymbols(sectorKey) {
   const pf = getPortfolioByKey(sectorKey);
@@ -399,12 +427,13 @@ function findParentSector(sym) {
 
 /* ── Switch benchmark (with full data reload) ── */
 function switchBenchmark(newBenchmark) {
-  if (newBenchmark === state.benchmark) {
+  const normalizedBenchmark = normalizeBenchmarkId(newBenchmark);
+  if (normalizedBenchmark === state.benchmark) {
     renderChart();
     renderSidebar();
     return;
   }
-  state.benchmark = newBenchmark;
+  state.benchmark = normalizedBenchmark;
   state.stockData = {};
   renderBenchmarkButtons();
   loadData();
@@ -441,21 +470,37 @@ function renderBenchmarkButtons() {
 
 /* ── Controls: Tail ── */
 function renderTailButtons() {
-  const container = document.getElementById("tailButtons");
-  container.innerHTML = "";
-  TAIL_LENGTHS.forEach(t => {
-    const btn = document.createElement("button");
-    btn.className = "btn-tail" + (t === state.tailLength ? " active" : "");
-    btn.textContent = t + "w";
-    btn.addEventListener("click", () => {
-      if (t === state.tailLength) return;
-      state.tailLength = t;
-      state.stockData = {};
-      renderTailButtons();
-      loadData();
-    });
-    container.appendChild(btn);
+  const select = document.getElementById("tailLengthSelect");
+  select.innerHTML = "";
+
+  const commonGroup = document.createElement("optgroup");
+  commonGroup.label = "Common";
+  SHORT_TAIL_LENGTHS.forEach((t) => {
+    const option = document.createElement("option");
+    option.value = String(t);
+    option.textContent = `${t}w`;
+    commonGroup.appendChild(option);
   });
+  select.appendChild(commonGroup);
+
+  const extendedGroup = document.createElement("optgroup");
+  extendedGroup.label = "Extended (4w steps)";
+  EXTENDED_TAIL_LENGTHS.forEach((t) => {
+    const option = document.createElement("option");
+    option.value = String(t);
+    option.textContent = `${t}w`;
+    extendedGroup.appendChild(option);
+  });
+  select.appendChild(extendedGroup);
+
+  select.value = String(state.tailLength);
+  select.onchange = () => {
+    const nextTail = Number(select.value);
+    if (!Number.isFinite(nextTail) || nextTail === state.tailLength) return;
+    state.tailLength = nextTail;
+    state.stockData = {};
+    loadData();
+  };
 }
 
 /* ── Highlight ── */
